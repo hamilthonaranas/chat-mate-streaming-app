@@ -1,0 +1,110 @@
+# Git ignore for ChattMate Spring Boot Application
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Compiled files
+target/
+build/
+*.class
+*.jar
+*.war
+*.ear
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.orig
+release.properties
+dependency-reduced-pom.xml
+.m2/
+
+# Gradle
+gradle/
+.gradle/
+build/
+.gradletasknamecache
+
+# Package managers
+node_modules/
+package-lock.json
+yarn.lock
+npm-debug.log
+.npm
+.env.local
+.env.*.local
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.properties.local
+
+# Database
+db/
+*.db
+*.sql
+
+# Logs
+logs/
+*.log
+*log*.txt
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Application runtime
+application.pid
+
+# OS
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup files
+*.bak
+*.backup
+
+# Local development
+local.properties
+
+# Test coverage
+coverage/
+.coverage
+.codecov
+
+# Build artifacts
+dist/
+releases/
+
+# Application files
+.springBoot
+
+# Any local notes
+NOTES.txt
+DEVELOPMENT.md
+LOCAL_SETUP.md
+
+# Docker
+Dockerfile.local
+docker-compose.local.yml
+.dockerignore
+
+# Custom
+!.gitkeep

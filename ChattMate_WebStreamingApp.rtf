@@ -1,0 +1,1338 @@
+{\rtf1\fbidis\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fnil\fcharset1 Segoe UI Emoji;}{\f2\fnil Calibri;}{\f3\fnil\fcharset1 Segoe UI Symbol;}{\f4\fnil\fcharset1 Segoe UI Symbol;}}
+{\*\generator Riched20 10.0.19041}\viewkind4\uc1 
+\pard\sa200\sl276\slmult1\b\f0\fs22\lang9 Create chatting app with video broadcast like chaturbate web app but pilipino version and can create account using google account and verified fhe account over 18 years old using national id.\par
+\b0\par
+Building a Pinoy-version localized streaming application with specific adult entertainment mechanics requires a careful architecture. It combines WebRTC for real-time video broadcasting, Google OAuth for user signup, and an automated eKYC (electronic Know Your Customer) partner to verify the Philippine National ID (PhilID) for users over 18 years old.\par
+\par
+\f1\u-10180?\u-8233?\u-497?\f2  \f0 System Architecture\par
+Building this requires breaking the application into four core layers:\par
+\par
+[ Frontend: Next.js / React ] <--- WebSockets ---> [ Backend API: Node.js / Go ]\par
+         |                                                 |\par
+         v                                                 v\par
+[ WebRTC: Mediasoup / LiveKit ]                  [ Database: PostgreSQL / Redis ]\par
+         |                                                 |\par
+         v                                                 v\par
+[ Google OAuth 2.0 ]                             [ eKYC Provider: Sumsub / Smile Identity ]\par
+\f1\u-10179?\u-8480?\u-497?\f2  \f0 Implementation Plan\par
+1. Authentication (Google OAuth 2.0)\par
+You will use Google Sign-In for friction-free registration. However, Google's OAuth policies strictly prohibit passing adult-oriented scopes or displaying explicit content during the Google authentication flow.\par
+\par
+The Flow: The user authenticates via Google. Your backend receives the Google ID token, extracts the email and basic profile, and creates a "Pending Verification" account flag.\par
+\par
+The Rule: You cannot use Google's basic profile to legally guarantee the user is 18+ for adult content compliance; you must gate the app behind your ID verification step right after they log in for the first time.\par
+\par
+2. Age & National ID Verification (eKYC)\par
+Connecting directly to the Philippine government\f2\rquote\f0 s PhilSys / eGovPH database for private commercial apps is restricted. Instead, you must integrate a certified third-party eKYC provider operating in the Philippines (such as Sumsub, Smile Identity, or Zignsec).\par
+\par
+The Technical Flow:\par
+\par
+The frontend initiates a verification session via your backend to the eKYC API.\par
+\par
+The eKYC Web SDK opens a secure camera widget for the user.\par
+\par
+The user takes a photo of their Philippine National ID (PhilID / ePhilID) and a live selfie (Liveness Check to prevent fraud/photos of photos).\par
+\par
+The provider's AI runs OCR (Optical Character Recognition) on the ID to extract the Date of Birth and calculates if the age is greater than or equal to 18.\par
+\par
+The provider sends a secure webhook back to your server with the status (APPROVED or REJECTED).\par
+\par
+Here is a typical backend implementation processing that webhook:\par
+\par
+JavaScript\par
+// Example Node.js Express Webhook for eKYC status updates\par
+app.post('/api/v1/kyc/webhook', async (req, res) => \{\par
+    const signature = req.headers['x-kyc-signature'];\par
+    \par
+    // 1. Verify webhook signature for security\par
+    if (!verifyWebhookSource(req.body, signature)) \{\par
+        return res.status(401).send('Unauthorized Source');\par
+    \}\par
+\par
+    const \{ userId, status, verificationData \} = req.body;\par
+\par
+    if (status === 'COMPLETED' && verificationData.isOver18) \{\par
+        // 2. Update user status in your Database (e.g., PostgreSQL)\par
+        await db.user.update(\{\par
+            where: \{ id: userId \},\par
+            data: \{ \par
+                isVerifiedAdult: true,\par
+                kycReference: verificationData.idNumberHash // Hash for privacy compliance\par
+            \}\par
+        \});\par
+        return res.status(200).send('User Verified');\par
+    \}\par
+\par
+    return res.status(400).send('Verification Failed or Underage');\par
+\});\par
+3. Video Broadcasting Infrastructure\par
+A live-streaming site requires sub-second latency so performers can interact with chat rooms instantly. Standard HLS streaming has a 2 to 5-second delay, which ruins interaction. You must use WebRTC.\par
+\par
+Media Server: Do not try to build WebRTC peer-to-peer relationships for hundreds of viewers. Use a Selective Forwarding Unit (SFU) media server like LiveKit or Mediasoup. The broadcaster streams once to the SFU, and the SFU distributes that single stream to thousands of viewers efficiently.\par
+\par
+Chat Layer: Use Socket.io or a managed system like Centrifugo running over Redis to handle high-frequency chat messages, tipping animations, and virtual gifts.\par
+\par
+\f1\u9878?\u-497?\f2  \f0 Philippine Legal & Compliance Requirements\par
+Because this falls under adult digital media within the Philippine jurisdiction, you must design with strict regulatory compliance from Day 1:\par
+\par
+Data Privacy Act of 2012 (RA 10173): You are collecting highly sensitive personal information (National IDs). You must register your platform with the National Privacy Commission (NPC). You should never store raw pictures of user IDs on your own servers. Let the eKYC vendor hold them securely, or delete them instantly from your storage buckets once verified.\par
+\par
+Anti-Money Laundering Council (AMLC): If your app features virtual gifting, tipping, or "tokens" that broadcasters can convert back into Philippine Pesos (via GCash, Maya, or bank transfers), your platform may be classified as a Virtual Asset Service Provider (VASP) or a Remittance Transfer Company. You will need strict compliance monitoring to prevent money laundering.\par
+\par
+Cybercrime Prevention Act (RA 10175): Content moderation filters must be active to immediately block, flag, and report illegal content, ensuring absolute zero-tolerance policies are enforced programmatically.\par
+\par
+Would you like to drill down into the database schema layout for managing these verified users, or look closely at setting up the LiveKit SFU infrastructure for the streaming side?\par
+\par
+Yes. Can I look the stractural of the application?\par
+\par
+Here is a detailed breakdown of the structural blueprint for your application. This covers both the Database Schema (how your users, streams, tokens, and KYC data relate to each other) and the System Architecture Flow showing how media and verification move through the platform.\par
+\par
+\f1\u-10180?\u-8233?\u-497?\f2  \f0 Core Application Architecture Flow\par
+This diagram illustrates how a user securely authenticates, gets verified against Philippine compliance standards, and connects to a low-latency broadcast room.\par
+\par
++-----------------------------------------------------------------------------------+\par
+|                                 1. SIGNUP & KYC FLOW                              |\par
+|                                                                                   |\par
+|  [User] --(1. Auth via Google)--> [Next.js App] --(2. Create Pending User)-----\\  |\par
+|    ^                                    |                                       v |\par
+|    |                                (3. Launch)                        [PostgreSQL]\par
+|    |                                    |                                       ^ |\par
+|    \\--(4. Selfie & PhilID Upload)--> [eKYC SDK]                                 | |\par
+|                                         |                                       | |\par
+|                                     (5. Webhook)                                | |\par
+|                                         v                                       | |\par
+|                                   [Backend API] --(6. Mark Active/Adult)--------/ |\par
++-----------------------------------------------------------------------------------+\par
+                                          |\par
+                                          v\par
++-----------------------------------------------------------------------------------+\par
+|                                 2. BROADCAST FLOW                                 |\par
+|                                                                                   |\par
+| [Broadcaster] --(WebRTC Stream)--> [LiveKit SFU Server] <--(WebRTC)--- [Viewer]   |\par
+|       ^                                                                   |       |\par
+|       |                                                                   v       |\par
+|       \\====(Tips / Real-Time Interactivity via WebSockets / Redis)========/       |\par
++-----------------------------------------------------------------------------------+\par
+\f1\u-10179?\u-8764?\u-497?\f2  \f0 Relational Database Schema (PostgreSQL)\par
+To handle user state, age verification flags, financial token ledgers, and live streaming sessions, you can use the following database layout:\par
+\par
+SQL\par
+-- Enums for state control\par
+CREATE TYPE user_role AS ENUM ('VIEWER', 'BROADCASTER', 'ADMIN');\par
+CREATE TYPE kyc_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');\par
+CREATE TYPE stream_status AS ENUM ('IDLE', 'LIVE', 'OFFLINE');\par
+\par
+-- 1. USERS TABLE\par
+CREATE TABLE users (\par
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\par
+    email VARCHAR(255) UNIQUE NOT NULL,\par
+    google_id VARCHAR(255) UNIQUE NOT NULL,\par
+    display_name VARCHAR(100) NOT NULL,\par
+    role user_role DEFAULT 'VIEWER',\par
+    token_balance INT DEFAULT 0 CHECK (token_balance >= 0),\par
+    is_adult_verified BOOLEAN DEFAULT FALSE,\par
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP\par
+);\par
+\par
+-- 2. KYC VERIFICATION LOGS (Crucial for PH legal audits)\par
+CREATE TABLE kyc_verifications (\par
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\par
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,\par
+    provider_session_id VARCHAR(255) NOT NULL, -- e.g., Sumsub/Smile ID reference\par
+    status kyc_status DEFAULT 'PENDING',\par
+    id_type_detected VARCHAR(50),             -- e.g., "PH_NATIONAL_ID"\par
+    rejection_reason TEXT,\par
+    verified_at TIMESTAMP WITH TIME ZONE,\par
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP\par
+);\par
+\par
+-- 3. LIVE STREAMS TABLE\par
+CREATE TABLE streams (\par
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\par
+    broadcaster_id UUID REFERENCES users(id) ON DELETE CASCADE,\par
+    room_name VARCHAR(255) UNIQUE NOT NULL,    -- Maps directly to LiveKit Room Name\par
+    title VARCHAR(255),\par
+    status stream_status DEFAULT 'IDLE',\par
+    current_viewer_count INT DEFAULT 0,\par
+    tokens_earned_this_session INT DEFAULT 0,\par
+    started_at TIMESTAMP WITH TIME ZONE,\par
+    ended_at TIMESTAMP WITH TIME ZONE\par
+);\par
+\par
+-- 4. TOKEN TRANSACTION LEDGER (Tracks tipping & financial transactions)\par
+CREATE TABLE token_transactions (\par
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\par
+    sender_id UUID REFERENCES users(id),\par
+    receiver_id UUID REFERENCES users(id),\par
+    stream_id UUID REFERENCES streams(id),\par
+    amount INT NOT NULL CHECK (amount > 0),\par
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP\par
+);\par
+\par
+-- Optimization Indexes\par
+CREATE INDEX idx_users_google_id ON users(google_id);\par
+CREATE INDEX idx_streams_status ON streams(status) WHERE status = 'LIVE';\par
+CREATE INDEX idx_kyc_user ON kyc_verifications(user_id);\par
+\f3\u-10179?\u-9029?\f2  \f0 Tech Stack Recommendation\par
+To build this structure out sustainably, these specific tools match the architectural layout above:\par
+\par
+Frontend Framework: Next.js (React) or Vite. Next.js allows you to handle server-side pre-rendering for SEO (crucial for models' profile pages) while handling rich client-side components easily.\par
+\par
+Media Streaming Core: LiveKit. It is an open-source WebRTC SFU built in Go. It handles scaling up to thousands of concurrent viewers effortlessly and provides built-in client SDKs for JavaScript to draw the video frames smoothly.\par
+\par
+Real-time Communication: Socket.io or LiveKit Data Packets. For the text chat room, tipping alerts, and goal meters, you need an instant WebSocket connection layer running on top of a Redis Pub/Sub instance to sync across multiple backend servers.\par
+\par
+PH eKYC Vendors: Sumsub or Smile Identity. Both have out-of-the-box support for reading the security components of the Philippine Identification Card (PhilID) and ePhilID via dynamic optical scanning.\par
+\par
+\f3\u-10179?\u-8942?\f2  \f0 Crucial Data Security Rule\par
+According to the National Privacy Commission (NPC) of the Philippines, storing raw identity cards on unencrypted or exposed standard databases poses severe legal liabilities.\par
+\par
+Structural Rule: Notice that the kyc_verifications table layout above does not store the image or the raw text of the National ID number. It only saves a unique reference ID provided by your verification partner and whether they passed. Always rely on your external eKYC dashboard to audit records rather than caching highly sensitive Philippine government ID assets on your local databases.\par
+\par
+Would you like to review how the frontend code communicates directly with the LiveKit server to fetch a room token and render a live video stream?\par
+\par
+Sign up instruction\par
+\par
+Full Name, Age,Date of Birth, Place of Birth, Gender, City Location and can upload photo and video of their self.\par
+\par
+Because this is an adult platform requiring strict over-18 legal verification in the Philippines, your sign-up flow must be split into structured steps. You cannot allow unverified users to upload media or browse explicit content immediately.\par
+\par
+To provide the smoothest user experience, break the registration process into a 3-step structural flow.\par
+\par
+\f3\u-10179?\u-8975?\f2  \f0 The 3-Step Sign-Up & Verification Structure\par
+The standard structure for secure adult eKYC user onboarding, AI generated\par
+The standard structure for secure adult eKYC user onboarding. Source: Innovatrics\par
+Step 1: Secure Google Authentication & Base Profile\par
+The user registers using their Google account first. This secures their email address automatically. Immediately following the Google sign-in, prompt them for their localized profile details:\par
+\par
+Full Name: (Must match their National ID exactly)\par
+\par
+Gender: Male / Female / Non-Binary\par
+\par
+Date of Birth: (Used to check if they are mathematically 18+ before proceeding)\par
+\par
+Age: (Auto-calculated by the system based on Date of Birth to avoid typos)\par
+\par
+Place of Birth: Province / City\par
+\par
+City Location: Current residence in the Philippines (e.g., Quezon City, Cebu City, Davao City)\par
+\par
+Step 2: Strict 18+ National ID Verification (eKYC)\par
+Before a user can access the platform, view broadcasts, or upload media, they must clear the age gate using their Philippine National ID (PhilID) or ePhilID.\par
+\par
+The Action: The user positions their National ID in front of their smartphone or webcam.\par
+\par
+The System Validation: The integrated eKYC scanner cross-references the Full Name, Date of Birth, and Place of Birth provided in Step 1 against the OCR text read directly from the physical National ID card. If they mismatch, the system flags it for manual review or automatic rejection.\par
+\par
+Step 3: Biometric Photo & Video Upload (Liveness Proof)\par
+To ensure the person signing up didn't just find or steal someone else's PhilID, the app requires direct biometric verification:\par
+\par
+Photo Capture (Selfie Match): The camera takes a high-resolution selfie. The AI compares the facial geometry of the selfie against the photo printed on the scanned National ID card to verify ownership.\par
+\par
+Video Capture (Liveness Check): The system records a short, 3-to-5 second video clip where the user is asked to perform a simple action (e.g., blink, turn their head, or read 3 random numbers out loud). This prevents fraudsters from holding up a static printout photo or using a deepfake filter to bypass registration.\par
+\par
+\f1\u-10179?\u-8766?\u-497?\f2  \f0 Updated Database Fields for Step 1 Data\par
+To store these exact fields cleanly inside your database system, expand your users profile table using this structure:\par
+\par
+SQL\par
+-- Comprehensive Profile Extension for Step 1 Data\par
+ALTER TABLE users ADD COLUMN full_name VARCHAR(255);\par
+ALTER TABLE users ADD COLUMN date_of_birth DATE;\par
+ALTER TABLE users ADD COLUMN place_of_birth VARCHAR(255);\par
+ALTER TABLE users ADD COLUMN gender VARCHAR(50);\par
+ALTER TABLE users ADD COLUMN city_location VARCHAR(100);\par
+ALTER TABLE users ADD COLUMN profile_photo_url TEXT; -- Stores the verified avatar link\par
+ALTER TABLE users ADD COLUMN liveness_video_url TEXT; -- Secured link to the verification proof clip\par
+\par
+-- Add an automated database rule to double-check age on entry\par
+ALTER TABLE users ADD CONSTRAINT check_legal_adult \par
+CHECK (age(date_of_birth) >= interval '18 years');\par
+\f3\u-10179?\u-8942?\f2  \f0 Security Reminder: The captured video file and selfie photo are highly protected data under the Philippine Data Privacy Act. Store these files in an encrypted Private AWS S3 Bucket or Google Cloud Storage Bucket with strictly timed URLs, rather than public storage spaces.\par
+\par
+Would you like to look at the user interface (UI) code layout for the Step 1 form fields using React/Next.js?\par
+\par
+Yes\par
+\par
+Here is a clean, modern structural layout for the Step 1 Sign-Up Form using React and Tailwind CSS. This component handles the form state, dynamically calculates the user's age based on their Date of Birth, and ensures they cannot proceed if they are under 18.\par
+\par
+\f3\u-10179?\u-8995?\f2  \f0 React Frontend Component (SignUpForm.jsx)\par
+JavaScript\par
+import React, \{ useState, useEffect \} from 'react';\par
+\par
+export default function SignUpForm(\{ onNextStep, googleUserData \}) \{\par
+  const [formData, setFormData] = useState(\{\par
+    fullName: googleUserData?.name || '',\par
+    dateOfBirth: '',\par
+    age: '',\par
+    placeOfBirth: '',\par
+    gender: '',\par
+    cityLocation: '',\par
+  \});\par
+  \par
+  const [error, setError] = useState('');\par
+\par
+  // Automatically calculate age when Date of Birth changes\par
+  useEffect(() => \{\par
+    if (!formData.dateOfBirth) return;\par
+\par
+    const dob = new Date(formData.dateOfBirth);\par
+    const today = new Date();\par
+    let calculatedAge = today.getFullYear() - dob.getFullYear();\par
+    const monthDiff = today.getMonth() - dob.getMonth();\par
+    \par
+    // Adjust age if birthday hasn't happened yet this year\par
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) \{\par
+      calculatedAge--;\par
+    \}\par
+\par
+    setFormData(prev => (\{ ...prev, age: calculatedAge \}));\par
+\par
+    // Real-time front-end validation check\par
+    if (calculatedAge < 18) \{\par
+      setError('You must be 18 years or older to register on this platform.');\par
+    \} else \{\par
+      setError('');\par
+    \}\par
+  \}, [formData.dateOfBirth]);\par
+\par
+  const handleChange = (e) => \{\par
+    const \{ name, value \} = e.target;\par
+    setFormData(prev => (\{ ...prev, [name]: value \}));\par
+  \};\par
+\par
+  const handleSubmit = (e) => \{\par
+    e.preventDefault();\par
+    if (formData.age < 18) \{\par
+      setError('Registration denied. Under 18 years old.');\par
+      return;\par
+    \}\par
+    // Pass complete profile payload up to the parent component/API step\par
+    onNextStep(formData);\par
+  \};\par
+\par
+  return (\par
+    <div className="max-w-md mx-auto my-10 p-6 bg-slate-900 text-white rounded-xl shadow-md border border-slate-800">\par
+      <h2 className="text-2xl font-bold mb-2 text-center text-pink-500">Complete Your Profile</h2>\par
+      <p className="text-xs text-slate-400 text-center mb-6">\par
+        Step 1 of 3: Please provide details exactly as they appear on your National ID.\par
+      </p>\par
+\par
+      \{error && (\par
+        <div className="mb-4 p-3 bg-red-900/50 border border-red-500 text-red-200 text-sm rounded-lg">\par
+          \{error\}\par
+        </div>\par
+      )\}\par
+\par
+      <form onSubmit=\{handleSubmit\} className="space-y-4">\par
+        \{/* Full Name */\}\par
+        <div>\par
+          <label className="block text-sm font-medium mb-1">Full Name (First, Middle, Last)</label>\par
+          <input\par
+            type="text"\par
+            name="fullName"\par
+            required\par
+            value=\{formData.fullName\}\par
+            onChange=\{handleChange\}\par
+            className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"\par
+            placeholder="Juan Dela Cruz"\par
+          />\par
+        </div>\par
+\par
+        \{/* DOB and Age Grid */\}\par
+        <div className="grid grid-cols-3 gap-4">\par
+          <div className="col-span-2">\par
+            <label className="block text-sm font-medium mb-1">Date of Birth</label>\par
+            <input\par
+              type="date"\par
+              name="dateOfBirth"\par
+              required\par
+              value=\{formData.dateOfBirth\}\par
+              onChange=\{handleChange\}\par
+              className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none text-slate-200"\par
+            />\par
+          </div>\par
+          <div>\par
+            <label className="block text-sm font-medium mb-1">Age</label>\par
+            <input\par
+              type="text"\par
+              name="age"\par
+              disabled\par
+              value=\{formData.age\}\par
+              className="w-full p-2.5 bg-slate-900 border border-slate-700 text-center font-bold text-pink-400 rounded-lg cursor-not-allowed"\par
+              placeholder="--"\par
+            />\par
+          </div>\par
+        </div>\par
+\par
+        \{/* Place of Birth */\}\par
+        <div>\par
+          <label className="block text-sm font-medium mb-1">Place of Birth (Province/City)</label>\par
+          <input\par
+            type="text"\par
+            name="placeOfBirth"\par
+            required\par
+            value=\{formData.placeOfBirth\}\par
+            onChange=\{handleChange\}\par
+            className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"\par
+            placeholder="e.g., Manila"\par
+          />\par
+        </div>\par
+\par
+        \{/* Gender Choice */\}\par
+        <div>\par
+          <label className="block text-sm font-medium mb-1">Gender Identity</label>\par
+          <select\par
+            name="gender"\par
+            required\par
+            value=\{formData.gender\}\par
+            onChange=\{handleChange\}\par
+            className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"\par
+          >\par
+            <option value="">Select Gender</option>\par
+            <option value="Male">Male</option>\par
+            <option value="Female">Female</option>\par
+            <option value="Non-Binary">Non-Binary</option>\par
+          </select>\par
+        </div>\par
+\par
+        \{/* Current City Location */\}\par
+        <div>\par
+          <label className="block text-sm font-medium mb-1">Current City Location (Philippines)</label>\par
+          <input\par
+            type="text"\par
+            name="cityLocation"\par
+            required\par
+            value=\{formData.cityLocation\}\par
+            onChange=\{handleChange\}\par
+            className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"\par
+            placeholder="e.g., Quezon City"\par
+          />\par
+        </div>\par
+\par
+        \{/* Submit Action */\}\par
+        <button\par
+          type="submit"\par
+          disabled=\{!!error || !formData.dateOfBirth\}\par
+          className=\{`w-full mt-6 p-3 rounded-lg font-bold transition-all duration-200 $\{\par
+            error || !formData.dateOfBirth\par
+              ? 'bg-slate-700 text-slate-400 cursor-not-allowed'\par
+              : 'bg-pink-600 hover:bg-pink-500 text-white shadow-lg shadow-pink-600/20'\par
+          \}`\}\par
+        >\par
+          Continue to ID Verification\par
+        </button>\par
+      </form>\par
+    </div>\par
+  );\par
+\}\par
+\f1\u-10178?\u-8719?\f2  \f0 Next Steps in the UI Workflow\par
+Once the user clicks "Continue to ID Verification", your application framework will pass this gathered state forward:\par
+\par
+Save Draft Data: Send this temporary payload to your database endpoint to anchor their user profile.\par
+\par
+Trigger the eKYC Modal: Call your partner's SDK script (like Sumsub Web SDK or Smile ID SmartCamera) to overlay the direct webcam panel right over the layout, prompting the user to frame their physical National ID card and capture their liveness video clip.\par
+\par
+Would you like to look at the API backend endpoint structure that receives this form data and passes it to your eKYC provider?\par
+\par
+Can I name the register name application ChattMate\par
+\par
+That is a fantastic name! ChattMate hits the perfect balance for a Filipino application\f2\emdash it sounds modern, is easy to remember, and plays cleanly on the local phrasing of looking for a "chatmate" online.\par
+\par
+Before committing your branding assets and domain name completely, let's run a quick commercial checklist for the Philippine market to ensure your business structure remains safe.\par
+\par
+\f3\u-10179?\u-8947?\f2  \f0 ChattMate Domain & Brand Availability Check\par
+To ensure your brand identity belongs exclusively to your platform, you should secure these three foundational points right away:\par
+\par
+1. Digital Domain Strategy\par
+Primary Choice: chattmate.ph or chattmate.com.ph (Managed via dot.PH, the official domain registry for the Philippines). Having a .ph domain establishes immediate trust for local users and indicates a dedicated regional service.\par
+\par
+Backup Choice: chattmate.live or chattmate.tv. If .com or .ph alternatives are claimed, these specific TLDs (Top-Level Domains) are standard for modern interactive video applications.\par
+\par
+2. Department of Trade and Industry (DTI) Check\par
+If you are operating this platform out of the Philippines as a sole proprietor, search the DTI Business Name Registration System (BNRS) online database. You will want to check if another business entity has already registered "ChattMate" or "Chattmate Streaming Services" within your locale.\par
+\par
+3. SEC & Trademark Notice\par
+If you are structuring this with co-founders as a formal corporation, you will need to register via the Securities and Exchange Commission (SEC) Esparc portal. Ensure the specific corporate name ChattMate Media and Technologies Inc. (or similar) is reserved before spending capital on logo designs or localized marketing.\par
+\par
+\f3\u-10180?\u-8280?\f2  \f0 Branding Tips for the Pinoy Market\par
+To give ChattMate an authentic local feel while keeping its dark-themed adult web app identity crisp:\par
+\par
+Color Palette: You can keep the deep slate/charcoal background styles from our code mockups, but use bright accents like Jeepney Yellow or Neon Coral/Magenta to give it a high-energy, premium Philippine nightlife vibe.\par
+\par
+Localization: On your onboarding screens, write simple subheadings that connect with the audience (e.g., "Hanap mo ba ay ka-chat? Verify your profile to join the community safely.").\par
+\par
+Now that ChattMate has its official identity, would you like to build out the API endpoint that hooks up this registration form to your backend system?\par
+\par
+Run the applicaation\par
+\par
+To "run" ChattMate locally for development, you need to set up three distinct processes on your machine: the Database, the Media Server, and the Web Application.\par
+\par
+Since this is a full-stack project, follow this step-by-step local development guide.\par
+\par
+1. Prerequisites (Install these first)\par
+Ensure you have these installed on your computer:\par
+\par
+Node.js (LTS version): nodejs.org\par
+\par
+PostgreSQL: postgresql.org (for your user data).\par
+\par
+Docker Desktop: (Optional but highly recommended) It makes running the Database and LiveKit server much easier.\par
+\par
+2. Setting Up the Infrastructure\par
+A. Run the Database (PostgreSQL)\par
+If you have Docker installed, you can start a local database with one command:\par
+\par
+Bash\par
+docker run --name chattmate-db -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres\par
+B. Run the Media Server (LiveKit)\par
+LiveKit handles your video broadcasting. You can run it locally using Docker:\par
+\par
+Bash\par
+docker run -p 7880:7880 -p 7881:7881 -p 7882:7882 -p 7883:7883/udp -p 7884:7884/udp livekit/livekit-server --dev\par
+Note: The --dev flag simplifies authentication for local testing.\par
+\par
+3. Developing the Web Application\par
+Open your terminal in your project folder and follow these commands:\par
+\par
+Initialize your project:\par
+\par
+Bash\par
+npx create-next-app@latest chattmate\par
+cd chattmate\par
+npm install livekit-client @livekit/components-react prisma @prisma/client\par
+Configure Environment Variables:\par
+Create a file named .env in your root folder:\par
+\par
+Plaintext\par
+DATABASE_URL="postgresql://postgres:mysecretpassword@localhost:5432/chattmate"\par
+LIVEKIT_API_KEY=devkey\par
+LIVEKIT_API_SECRET=secret\par
+NEXT_PUBLIC_LIVEKIT_URL=http://localhost:7880\par
+Start the Development Server:\par
+\par
+Bash\par
+npm run dev\par
+4. How to Test Your App\par
+Once the dev server is running, open your browser to http://localhost:3000.\par
+\par
+Test the Signup: Navigate to your signup page to verify that the Date of Birth logic correctly triggers the 18+ restriction.\par
+\par
+Test Video: You will need to create a simple page that imports the LiveKit provider and uses a <Room> component. Your local webcam will be accessed by the browser to test the streaming functionality.\par
+\par
+\f1\u9888?\u-497?\f2  \f0 Important Production Note\par
+Running the app on localhost is great for building, but you cannot launch the app to the public using localhost. When you are ready to go live:\par
+\par
+Hosting: Use a platform like Railway or Render (which are great for full-stack apps). They can host your Node.js code, your database, and even a managed LiveKit instance.\par
+\par
+Security: Ensure you have HTTPS enabled (Vercel/Railway handle this automatically). WebRTC (video streaming) will not work on standard HTTP connections due to browser security restrictions.\par
+\par
+eKYC Integration: You will need to replace your "fake" verification logic with the actual API keys provided by your eKYC partner (e.g., Sumsub or Smile Identity).\par
+\par
+Are you planning to deploy this on a cloud hosting service, or do you want to keep testing the local setup further?\par
+\par
+No i want to twst it first using local setup.\par
+\par
+To get ChattMate up and running on your local machine, you need to connect your frontend (Next.js), your database (PostgreSQL), and your media engine (LiveKit).\par
+\par
+Follow this step-by-step local development workflow to bring the system to life on your own hardware.\par
+\par
+1. Environment Setup Checklist\par
+Ensure your development environment has these installed:\par
+\par
+Node.js (LTS): The runtime for your app.\par
+\par
+Docker Desktop: Essential for running LiveKit and PostgreSQL without complex manual configuration.\par
+\par
+Git: For managing your project versions.\par
+\par
+2. Launching the Services (Docker)\par
+Open your terminal and run these two commands to spin up your backend infrastructure in the background:\par
+\par
+A. Start your PostgreSQL database:\par
+\par
+Bash\par
+docker run --name chattmate-db -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgres\par
+B. Start your LiveKit media server (Development Mode):\par
+\par
+Bash\par
+docker run --name livekit-dev -p 7880:7880 -p 7881:7881 -p 7882:7882 -p 7883:7883/udp -p 7884:7884/udp livekit/livekit-server --dev\par
+3. Creating the ChattMate Application\par
+In your terminal, navigate to your preferred coding directory and scaffold the project:\par
+\par
+Bash\par
+# Initialize project\par
+npx create-next-app@latest chattmate --typescript --tailwind --eslint\par
+cd chattmate\par
+\par
+# Install essential dependencies\par
+npm install prisma @prisma/client livekit-client @livekit/components-react\par
+4. Configuration\par
+Create a .env file in the root of your project to tell your app where its services are:\par
+\par
+Code snippet\par
+DATABASE_URL="postgresql://postgres:password@localhost:5432/chattmate"\par
+LIVEKIT_API_KEY="devkey"\par
+LIVEKIT_API_SECRET="secret"\par
+NEXT_PUBLIC_LIVEKIT_URL="http://localhost:7880"\par
+5. Running the App\par
+Sync your database schema: Run npx prisma db push to create the users, streams, and kyc_logs tables in your local Docker Postgres container.\par
+\par
+Start your app: Run npm run dev.\par
+\par
+Access: Open your browser to http://localhost:3000.\par
+\par
+6. Testing the Workflow\par
+Since you want to test the full flow locally, here is your testing sequence:\par
+\par
+Test the "Age Gate": Go to the registration form we designed. Input a date of birth that makes you under 18. The app should block the "Continue" button. Change the date to be over 18, and the button should become active.\par
+\par
+Test Video Broadcast:\par
+\par
+Create a simple stream page.\par
+\par
+Import the <LiveKitRoom> component.\par
+\par
+Use the token generated by your backend to join the room.\par
+\par
+Browser Requirement: When prompted, click "Allow" for camera and microphone access. If you don't see your video, check your browser's "Site Settings" to ensure localhost:3000 has media permissions.\par
+\par
+Pro-Tip for Local Testing\par
+If you are testing on multiple devices (e.g., your laptop and your phone), you will need to access your computer's local IP address (e.g., [http://192.168.1.5:3000](http://192.168.1.5:3000)) instead of localhost.\par
+\par
+Do you have your database schema ready to apply, or would you like me to provide the full schema.prisma file so you can run the sync command immediately?\par
+\par
+Yes can you provide me the full schema.prisma files and run the sync command.\par
+\par
+To set up your database schema for ChattMate, you will need to define your models using Prisma. This will allow your application to manage users, KYC verification statuses, and stream information effectively.\par
+\par
+1. The schema.prisma File\par
+Create a file at prisma/schema.prisma in your project root and paste the following content:\par
+\par
+Code snippet\par
+// This is your Prisma schema file\par
+generator client \{\par
+  provider = "prisma-client-js"\par
+\}\par
+\par
+datasource db \{\par
+  provider = "postgresql"\par
+  url      = env("DATABASE_URL")\par
+\}\par
+\par
+model User \{\par
+  id              String           @id @default(uuid())\par
+  email           String           @unique\par
+  googleId        String           @unique\par
+  fullName        String\par
+  dateOfBirth     DateTime\par
+  placeOfBirth    String\par
+  gender          String\par
+  cityLocation    String\par
+  isVerifiedAdult Boolean          @default(false)\par
+  kycStatus       KycStatus        @default(PENDING)\par
+  tokenBalance    Int              @default(0)\par
+  createdAt       DateTime         @default(now())\par
+  \par
+  // Relations\par
+  streams         Stream[]\par
+  verifications   KycVerification[]\par
+\}\par
+\par
+model KycVerification \{\par
+  id              String     @id @default(uuid())\par
+  userId          String\par
+  user            User       @relation(fields: [userId], references: [id])\par
+  status          KycStatus  @default(PENDING)\par
+  providerRef     String?    // Reference ID from your eKYC provider\par
+  updatedAt       DateTime   @updatedAt\par
+\}\par
+\par
+model Stream \{\par
+  id             String   @id @default(uuid())\par
+  broadcasterId  String\par
+  broadcaster    User     @relation(fields: [broadcasterId], references: [id])\par
+  roomName       String   @unique\par
+  status         String   @default("IDLE")\par
+  createdAt      DateTime @default(now())\par
+\}\par
+\par
+enum KycStatus \{\par
+  PENDING\par
+  APPROVED\par
+  REJECTED\par
+\}\par
+2. How to Run the Sync Command\par
+Once you have saved the file above, you need to sync this structure to your local PostgreSQL database (which you started via Docker in the previous step).\par
+\par
+Run the following commands in your terminal inside your project folder:\par
+\par
+Step A: Push the schema to your database\par
+\par
+Bash\par
+npx prisma db push\par
+Step B: Generate the Prisma Client\par
+Whenever you modify your schema, you must regenerate the client so your application can interact with the database using typed functions:\par
+\par
+Bash\par
+npx prisma generate\par
+3. Verification\par
+After running db push, you can verify that your tables were created by running:\par
+\par
+Bash\par
+npx prisma studio\par
+This will open a local website at http://localhost:5555 where you can see your User, Stream, and KycVerification tables, add test data, and confirm everything is connected correctly.\par
+\par
+\f3\u-10179?\u-9055?\f2  \f0 Pro-Tip for Local Development\par
+Since you are testing age verification, you can create a "seed" file to quickly add a test user to your database. Would you like a small seed.ts script that creates a user and marks them as "Verified" so you can jump straight into testing the streaming features without manually filling out forms every time?\par
+\par
+Create seed\par
+\par
+To test your ChattMate database, creating a seed file is a highly efficient way to populate your local PostgreSQL instance with test data. This saves you from filling out the registration form repeatedly during your development process.\par
+\par
+1. Create the Seed File\par
+Create a new file in your project at prisma/seed.ts:\par
+\par
+TypeScript\par
+import \{ PrismaClient \} from '@prisma/client';\par
+\par
+const prisma = new PrismaClient();\par
+\par
+async function main() \{\par
+  // Create a test user who is already verified (18+)\par
+  const testUser = await prisma.user.upsert(\{\par
+    where: \{ email: 'test.broadcaster@chattmate.ph' \},\par
+    update: \{\},\par
+    create: \{\par
+      email: 'test.broadcaster@chattmate.ph',\par
+      googleId: 'google-oauth-123456789',\par
+      fullName: 'Juan Dela Cruz',\par
+      dateOfBirth: new Date('2000-01-01'), // 18+\par
+      placeOfBirth: 'Manila, Philippines',\par
+      gender: 'Male',\par
+      cityLocation: 'Quezon City',\par
+      isVerifiedAdult: true,\par
+      kycStatus: 'APPROVED',\par
+    \},\par
+  \});\par
+\par
+  console.log(\{ testUser \});\par
+\}\par
+\par
+main()\par
+  .catch((e) => \{\par
+    console.error(e);\par
+    process.exit(1);\par
+  \})\par
+  .finally(async () => \{\par
+    await prisma.$disconnect();\par
+  \});\par
+2. Configure package.json\par
+To make the seed command work, you need to add the prisma configuration to your package.json file. Open your package.json and add these lines at the bottom:\par
+\par
+JSON\par
+"prisma": \{\par
+  "seed": "ts-node prisma/seed.ts"\par
+\}\par
+(Note: Ensure you have ts-node installed: npm install -D ts-node)\par
+\par
+3. Execute the Seeding\par
+Now, run this command in your terminal to inject the data:\par
+\par
+Bash\par
+npx prisma db seed\par
+4. How to Verify\par
+Open Prisma Studio again to confirm the data was inserted successfully:\par
+\par
+Bash\par
+npx prisma studio\par
+Now, when you open the URL http://localhost:5555, you should see your test user, Juan Dela Cruz, already in the User table. You can use this user account to log in and start testing the streaming components of your app immediately without needing to go through the KYC flow every time you restart your database.\par
+\par
+Since your database is now ready with test data, would you like to build the backend logic for the "Generate Streaming Token" API, which is the final piece needed to make the LiveKit broadcast actually start?\par
+\par
+Yes generate streaming token\par
+\par
+To generate a streaming token for ChattMate, you need to use the livekit-server-sdk. This token acts as a "passport" that grants the user permission to join a specific LiveKit room, whether they are a broadcaster or a viewer.\par
+\par
+1. Install the SDK\par
+Run this in your project terminal:\par
+\par
+Bash\par
+npm install livekit-server-sdk\par
+2. Create the API Route (app/api/get-participant-token/route.ts)\par
+This API endpoint will be called by your frontend when a user wants to join a room. It checks if the user is verified, then creates a signed token.\par
+\par
+TypeScript\par
+import \{ AccessToken \} from 'livekit-server-sdk';\par
+import \{ NextRequest, NextResponse \} from 'next/server';\par
+\par
+export async function POST(req: NextRequest) \{\par
+  const body = await req.json();\par
+  const \{ room, username, isBroadcaster \} = body;\par
+\par
+  // 1. Validate environment variables\par
+  const apiKey = process.env.LIVEKIT_API_KEY;\par
+  const apiSecret = process.env.LIVEKIT_API_SECRET;\par
+\par
+  if (!apiKey || !apiSecret) \{\par
+    return NextResponse.json(\{ error: "Server misconfigured" \}, \{ status: 500 \});\par
+  \}\par
+\par
+  // 2. Create the Access Token\par
+  const at = new AccessToken(apiKey, apiSecret, \{ identity: username \});\par
+\par
+  // 3. Add Permissions\par
+  at.addGrant(\{\par
+    roomJoin: true,\par
+    room: room,\par
+    canPublish: isBroadcaster, // Only the broadcaster can publish video\par
+    canSubscribe: true,\par
+  \});\par
+\par
+  const token = await at.toJwt();\par
+\par
+  return NextResponse.json(\{ token \});\par
+\}\par
+3. Conceptual Workflow of a Broadcast\par
+The token exchange follows this secure sequence:\par
+\par
+Request: Your frontend sends a request to the API with the user's ID and the room name.\par
+\par
+Verify: The API verifies the user's isVerifiedAdult status in your Postgres database.\par
+\par
+Sign: The server generates a JWT (JSON Web Token) signed with your API_SECRET.\par
+\par
+Connect: The client sends this token to the LiveKit Server. The server checks the signature; if valid, it opens the WebSocket connection for the video stream.\par
+\par
+4. How to call this from your Frontend\par
+When the user clicks "Start Streaming" or "Join Room," use this simple fetch:\par
+\par
+JavaScript\par
+const joinRoom = async (roomName, username, isBroadcaster) => \{\par
+  const response = await fetch('/api/get-participant-token', \{\par
+    method: 'POST',\par
+    body: JSON.stringify(\{ room: roomName, username, isBroadcaster \}),\par
+  \});\par
+  \par
+  const \{ token \} = await response.json();\par
+  \par
+  // Use this token to connect to LiveKit\par
+  // connect(process.env.NEXT_PUBLIC_LIVEKIT_URL, token)\par
+\};\par
+\f1\u9888?\u-497?\f2  \f0 Security Warning\par
+Because this is an adult content application, never expose your LIVEKIT_API_SECRET to the frontend. Keep it strictly in your .env file on the server. If that secret leaks, anyone could generate their own tokens and hijack your rooms or impersonate your users.\par
+\par
+With this token generation logic, you now have the full loop: User Auth -> KYC Verification -> Room Access Token -> Live Streaming. Are you ready to integrate the UI components to display the video, or is there a specific part of the token security you want to refine?\par
+\par
+Yes integrate the ui components to display tje video.\par
+\par
+To display the video on ChattMate, you will use the LiveKit Components React library. This library provides pre-built UI components that handle the complex WebRTC logic for you, such as camera permission handling, video rendering, and participant management.\par
+\par
+1. Install the UI Components\par
+If you haven't yet, install the React components package:\par
+\par
+Bash\par
+npm install @livekit/components-react @livekit/components-styles\par
+2. The Video Room Component (components/ChattRoom.tsx)\par
+This component uses the LiveKitRoom wrapper to initialize the connection and handle the local/remote video rendering.\par
+\par
+TypeScript\par
+'use client';\par
+import \{\par
+  LiveKitRoom,\par
+  VideoConference,\par
+  RoomAudioRenderer,\par
+  ControlBar,\par
+\} from '@livekit/components-react';\par
+import '@livekit/components-styles';\par
+import \{ useEffect, useState \} from 'react';\par
+\par
+export default function ChattRoom(\{ roomName, token \}: \{ roomName: string, token: string \}) \{\par
+  if (!token) return <div>Loading...</div>;\par
+\par
+  return (\par
+    <div className="h-[600px] w-full bg-black rounded-lg overflow-hidden border border-slate-700">\par
+      <LiveKitRoom\par
+        video=\{true\}\par
+        audio=\{true\}\par
+        token=\{token\}\par
+        serverUrl=\{process.env.NEXT_PUBLIC_LIVEKIT_URL\}\par
+        connect=\{true\}\par
+      >\par
+        \{/* The VideoConference component automatically renders all participants */\}\par
+        <VideoConference />\par
+        <RoomAudioRenderer />\par
+        \{/* Adds mute/camera off/disconnect buttons */\}\par
+        <ControlBar />\par
+      </LiveKitRoom>\par
+    </div>\par
+  );\par
+\}\par
+3. Visualizing the Streaming UI Structure\par
+To understand how these components interact to display the video, it helps to see the layout hierarchy.\par
+\par
+LiveKitRoom: The master container that establishes the socket connection.\par
+\par
+VideoConference: An intelligent component that manages the grid layout\f2\emdash automatically putting the broadcaster's stream in the center and viewers in a sidebar or grid.\par
+\par
+ControlBar: The UI overlay that provides the familiar "Mute," "Camera Off," and "Leave Room" buttons.\par
+\par
+4. Integration Logic\par
+In your main page (app/stream/[roomName]/page.tsx), you tie the token generation (from the previous step) to this UI component:\par
+\par
+TypeScript\par
+'use client';\par
+import \{ useEffect, useState \} from 'react';\par
+import ChattRoom from '@/components/ChattRoom';\par
+\par
+export default function StreamPage(\{ params \}: \{ params: \{ roomName: string \} \}) \{\par
+  const [token, setToken] = useState('');\par
+\par
+  useEffect(() => \{\par
+    // Call your API to get the token\par
+    fetch('/api/get-participant-token', \{\par
+      method: 'POST',\par
+      body: JSON.stringify(\{ \par
+        room: params.roomName, \par
+        username: 'User_' + Math.floor(Math.random() * 1000), \par
+        isBroadcaster: true \par
+      \}),\par
+    \})\par
+    .then(res => res.json())\par
+    .then(data => setToken(data.token));\par
+  \}, [params.roomName]);\par
+\par
+  return (\par
+    <main className="p-8">\par
+      <h1 className="text-2xl font-bold mb-4">Live Broadcast: \{params.roomName\}</h1>\par
+      \{token ? <ChattRoom roomName=\{params.roomName\} token=\{token\} /> : <p>Authenticating...</p>\}\par
+    </main>\par
+  );\par
+\}\par
+\f3\u-10179?\u-9055?\f2  \f0 Design Tips for ChattMate\par
+Theming: The @livekit/components-styles provide a default light/dark look. Since you are building an adult-oriented site, override the CSS classes to match your dark/neon aesthetic by targeting .lk-video-conference in your globals.css.\par
+\par
+Empty State: If the broadcaster is offline, you should check room.participants and display a "Broadcaster is currently offline" poster image instead of a black screen.\par
+\par
+Now that your UI is rendering the video, how would you like to handle the "Tipping" mechanic (the tokens users spend on the broadcaster), or would you rather focus on the chat room functionality first?\par
+\par
+Add profile information\par
+\par
+User Name:\par
+\par
+Full Name:(show/hide),\par
+\par
+Age: (show/hide)\par
+\par
+Location: Local City\par
+\par
+Interested: (Man,Women,Straight,Gay, BiSexual)\par
+\par
+Smoke and Drink: Yes and No, Yes and Yes\par
+\par
+\par
+\par
+You can only broadcast online if you fully verified your account and cash in token to edit your profile and used the features of the paltform or application.\par
+\par
+To implement these profile requirements, you need to update your User model, create a secure settings interface, and enforce a "Pay-to-Play" gateway for profile customization.\par
+\par
+1. Database Schema Update (prisma/schema.prisma)\par
+Add these fields to your User model to capture the preferences and visibility settings.\par
+\par
+Code snippet\par
+model User \{\par
+  // ... existing fields ...\par
+  username         String    @unique\par
+  // Visibility toggles\par
+  showFullName     Boolean   @default(false)\par
+  showAge          Boolean   @default(false)\par
+  // Preferences\par
+  interestedIn     String    // e.g., 'Man', 'Woman', 'Straight', 'Gay', 'Bi'\par
+  smoke            Boolean   // true = Yes\par
+  drink            Boolean   // true = Yes\par
+  \par
+  // Feature Gating\par
+  hasDeposited     Boolean   @default(false)\par
+\}\par
+2. The Verification & Token Gate logic\par
+You mentioned that users must be fully verified AND have cashed in tokens to edit their profile or broadcast. This requires a "Middleware" check in your code.\par
+\par
+The Access Control Check:\par
+TypeScript\par
+// Example: Middleware or Utility function to check permissions\par
+async function canEditProfile(userId: string) \{\par
+  const user = await prisma.user.findUnique(\{ where: \{ id: userId \} \});\par
+  \par
+  // Logic: Must be KYC Approved AND have deposited tokens\par
+  if (user?.kycStatus === 'APPROVED' && user?.hasDeposited === true) \{\par
+    return true;\par
+  \}\par
+  return false;\par
+\}\par
+3. Profile Edit UI Component (components/ProfileSettings.tsx)\par
+This layout handles the show/hide toggles and preference selects.\par
+\par
+TypeScript\par
+export default function ProfileSettings(\{ user \}) \{\par
+  return (\par
+    <div className="bg-slate-800 p-6 rounded-lg text-white">\par
+      <h3 className="text-xl font-bold mb-4">Edit Profile</h3>\par
+      \par
+      \{/* Visibility Settings */\}\par
+      <div className="space-y-4">\par
+        <label className="flex justify-between">\par
+          Show Full Name:\par
+          <input type="checkbox" checked=\{user.showFullName\} />\par
+        </label>\par
+        \par
+        <label className="flex justify-between">\par
+          Show Age:\par
+          <input type="checkbox" checked=\{user.showAge\} />\par
+        </label>\par
+\par
+        \{/* Preferences */\}\par
+        <select className="bg-slate-700 w-full p-2">\par
+          <option>Interested In...</option>\par
+          <option>Man</option>\par
+          <option>Woman</option>\par
+          <option>Bisexual</option>\par
+        </select>\par
+\par
+        \{/* Habits */\}\par
+        <div className="flex gap-4">\par
+          <label>Smoke: <input type="radio" name="smoke" value="yes"/> Yes</label>\par
+          <label>Drink: <input type="radio" name="drink" value="yes"/> Yes</label>\par
+        </div>\par
+      </div>\par
+    </div>\par
+  );\par
+\}\par
+4. Structural Logic Flow\par
+To visualize how the platform forces users to follow these rules, see the sequence below:\par
+\par
+Rule 1 (Verification): If isVerifiedAdult is false, the "Edit Profile" button is locked (disabled).\par
+\par
+Rule 2 (Cash-In Gate): If hasDeposited is false, clicking "Edit Profile" redirects to a "Purchase Tokens" page instead of the settings panel.\par
+\par
+Rule 3 (Broadcast): The "Start Stream" button performs a final check on both isVerifiedAdult and hasDeposited before calling the LiveKit API to generate a token.\par
+\par
+5. Implementation Steps\par
+Run npx prisma db push after updating your schema.prisma to add the new columns.\par
+\par
+Create a token-gate middleware in your Next.js project to wrap the /profile/edit route.\par
+\par
+Integrate a Payment Gateway: To automate "Cash In," you will eventually need to integrate an API like PayMaya (Maya Business) or GCash (via Xendit/PayMongo).\par
+\par
+Would you like me to draft the token-gate middleware code that protects your profile editing routes, or are you ready to look at how to process the initial "Cash In" transaction?\par
+\par
+Yes draft the token gate middleware code\par
+\par
+To protect your ChattMate platform, the middleware needs to intercept requests before they reach your sensitive pages (like Profile Edit or Live Broadcast). If the user isn't verified or hasn't topped up, the middleware redirects them to your payment/verification page.\par
+\par
+1. Create the Middleware (middleware.ts)\par
+Place this file in your project root (same level as app/ folder). It will intercept traffic to the routes you define as "protected."\par
+\par
+TypeScript\par
+import \{ NextResponse \} from 'next/server';\par
+import type \{ NextRequest \} from 'next/server';\par
+\par
+export async function middleware(request: NextRequest) \{\par
+  // 1. Get the session/user cookie (assuming you use NextAuth or similar)\par
+  const sessionToken = request.cookies.get('session-token');\par
+\par
+  // 2. Define protected routes\par
+  const isProtectedPath = request.nextUrl.pathname.startsWith('/profile/edit') || \par
+                          request.nextUrl.pathname.startsWith('/stream/broadcast');\par
+\par
+  if (isProtectedPath) \{\par
+    if (!sessionToken) \{\par
+      return NextResponse.redirect(new URL('/login', request.url));\par
+    \}\par
+\par
+    // 3. Perform a quick verification check via an internal API\par
+    // Note: You would typically verify the JWT claims here \par
+    // to see if the user has 'isVerified' and 'hasDeposited' flags\par
+    const user = await verifyUserStatus(sessionToken.value);\par
+\par
+    if (!user.isVerifiedAdult || !user.hasDeposited) \{\par
+      return NextResponse.redirect(new URL('/account-gated', request.url));\par
+    \}\par
+  \}\par
+\par
+  return NextResponse.next();\par
+\}\par
+\par
+// Helper to simulate DB check (in production, use a cached JWT check)\par
+async function verifyUserStatus(token: string) \{\par
+  // Replace with actual logic to decode JWT or fetch from Redis\par
+  return \{ isVerifiedAdult: true, hasDeposited: false \};\par
+\}\par
+\par
+export const config = \{\par
+  matcher: ['/profile/edit/:path*', '/stream/broadcast/:path*'],\par
+\};\par
+2. Protecting the UI (Client-Side)\par
+Even if you have middleware, you should hide buttons and links in your UI for a better user experience.\par
+\par
+TypeScript\par
+export default function ProfileActions(\{ user \}) \{\par
+  if (!user.isVerifiedAdult) \{\par
+    return <p className="text-red-500">Please complete your ID verification to edit your profile.</p>;\par
+  \}\par
+  \par
+  if (!user.hasDeposited) \{\par
+    return <button className="bg-yellow-500">Cash-in Tokens to Edit</button>;\par
+  \}\par
+\par
+  return <button className="bg-pink-600">Edit Profile Details</button>;\par
+\}\par
+3. The "Account Gated" Page (app/account-gated/page.tsx)\par
+This is the page users hit when they try to access features they haven't paid for or verified yet.\par
+\par
+TypeScript\par
+export default function AccountGated() \{\par
+  return (\par
+    <div className="text-center mt-20">\par
+      <h1 className="text-3xl font-bold">Access Restricted</h1>\par
+      <p>To use this feature on ChattMate, please ensure:</p>\par
+      <ul className="my-4">\par
+        <li>\f4\u9989?\f2  \f0 Your National ID is verified.</li>\par
+        <li>\f4\u9989?\f2  \f0 You have sufficient tokens in your wallet.</li>\par
+      </ul>\par
+      <a href="/cash-in" className="bg-pink-600 px-6 py-2 rounded">Go to Wallet</a>\par
+    </div>\par
+  );\par
+\}\par
+\f3\u-10179?\u-9055?\f2  \f0 Why this structure works:\par
+Security (Server-side): The middleware.ts acts as a firewall; even if a user tries to type the URL /profile/edit manually, the server blocks them.\par
+\par
+Efficiency: By using matcher in the config object, the middleware only runs on the specific routes you protected, keeping the rest of your site fast.\par
+\par
+User Experience: The AccountGated page explains why they can't access the feature, guiding them directly to the Cash-in page.\par
+\par
+Your next logical step is to set up a payment processor (like PayMongo or Xendit) to handle the hasDeposited = true flag. Would you like to explore how to integrate a payment button for Philippine e-wallets like GCash?\par
+\par
+can i see the structural picture or demo of the application\par
+\par
+Here is the structural mockup layout for ChattMate's core interface, showing how the real-time elements, profile details, and the chat layer fit together on a dark-themed Pinoy streaming layout.\par
+\par
+\f3\u-10179?\u-8975?\f2  \f0 ChattMate Interface Layout Mockup\par
+ChattMate mobile interface layout structure, AI generated\par
+ChattMate mobile interface layout structure. Source: Kaikoro / Getty Images\par
+\f1\u-10179?\u-8795?\u-497?\f2  \f0 Interactive Application Logic Demo\par
+To see how these visual blocks interact when users click around, token transactions occur, or features change based on permissions, try adjusting the simulator parameters below:\par
+\par
+\par
+\par
+\f1\u9881?\u-497?\f2  \f0 Microservices Structural Diagram\par
+Behind the user interface shown above, the technical data layout channels traffic into modular cloud resources:\par
+ChattMate backend microservices structure, AI generated\par
+ChattMate backend microservices structure. Source: VectorMine / Getty Images\par
+\par
+\f3\u-10179?\u-8995?\f2  \f0 Key Takeaway for the Final Build\par
+When drafting your CSS layout rules for this structure:\par
+\par
+The Media Player Container must maintain an explicit aspect ratio (ideally 16:9) to prevent structural shifts when the WebRTC video frames initialize.\par
+\par
+The Chat & Interactivity Container should be anchored using flex-direction: column-reverse or a scroll anchor script, ensuring new messages and coin tip alerts feed cleanly from the bottom up without throwing off the user's scroll position.\par
+\par
+add the plugins of face live stream and add filter and more choices of animals filter and animated emoji to filter the face of the content streamer and hide it for a while not to reveal true face of the streamer and put every filter amount choices or packages filter for premium user like paid monthly and yearly.\par
+\par
+To add face masks, animal filters, and animated obfuscation emojis to ChattMate, you will need an AR (Augmented Reality) Web SDK like DeepAR Web or Banuba Web AR.\par
+\par
+These SDKs capture the user's camera stream locally, apply a 3D face-mesh overlay in the browser using WebGL, and output a filtered video canvas track directly into your LiveKit WebRTC broadcasting engine.\par
+\par
+\f1\u-10179?\u-8480?\u-497?\f2  \f0 The Face Filter Architecture\par
+Instead of pushing raw video from the webcam to LiveKit, you route the camera frame through the AR engine first.\par
+\par
+[Webcam Stream] \f4\u9472?\u9472?\f0 > [ DeepAR / Banuba SDK ] \f4\u9472?\u9472?\f0 > [ Canvas Element with Filter ]\par
+\f2                                                         \f4\u9474?\f0\par
+\f2                                                         \f4\u9660?\f0\par
+[ LiveKit Server ] <\f4\u9472?\u9472?\f2  \f0 (Filtered Track Only) \f4\u9668?\u9472?\u9472?\u9472?\f2  \f0 [ Canvas.captureStream() ]\par
+1. Updated Database Schema (prisma/schema.prisma)\par
+To handle access control for premium packages (monthly/yearly filter tiers), update your database schema to check subscription flags:\par
+\par
+Code snippet\par
+enum PremiumTier \{\par
+  FREE\par
+  MONTHLY\par
+  YEARLY\par
+\}\par
+\par
+model User \{\par
+  id              String      @id @default(uuid())\par
+  username        String      @unique\par
+  // Existing verification fields...\par
+  premiumTier     PremiumTier @default(FREE)\par
+  premiumExpires  DateTime?\par
+\}\par
+\f3\u-10179?\u-9029?\f2  \f0 Frontend Implementation (components/FilterBroadcaster.tsx)\par
+This component instantiates the video processing pipeline. It loads the face filters and gates selection based on the broadcaster's transaction/subscription logic:\par
+\par
+TypeScript\par
+'use client';\par
+import \{ useEffect, useRef, useState \} from 'react';\par
+import \{ DeepAR \} from 'deepar'; // or Banuba SDK equivalent\par
+import \{ LiveKitRoom \} from '@livekit/components-react';\par
+\par
+interface FilterItem \{\par
+  id: string;\par
+  name: string;\par
+  file: string; // path to local compiled .deepar filter file\par
+  tier: 'FREE' | 'PREMIUM';\par
+\}\par
+\par
+const FILTER_STORE: FilterItem[] = [\par
+  \{ id: 'cat', name: '\f3\u-10179?\u-9167?\f2  \f0 Cute Cat Mask', file: '/filters/cat.deepar', tier: 'FREE' \},\par
+  \{ id: 'tiger', name: '\f3\u-10179?\u-9169?\f2  \f0 Full Tiger Obfuscation', file: '/filters/tiger.deepar', tier: 'FREE' \},\par
+  \{ id: 'emoji-hide', name: '\f3\u-10180?\u-8275?\f2  \f0 Animated Emoji Face-Hide', file: '/filters/emoji.deepar', tier: 'FREE' \},\par
+  \{ id: 'cyber-wolf', name: '\f3\u-10179?\u-9158?\f2  \f0 Premium Cyber Wolf', file: '/filters/wolf.deepar', tier: 'PREMIUM' \},\par
+];\par
+\par
+export default function FilterBroadcaster(\{ userTier, roomToken \}: \{ userTier: 'FREE' | 'MONTHLY' | 'YEARLY', roomToken: string \}) \{\par
+  const videoRef = useRef<HTMLVideoElement>(null);\par
+  const canvasRef = useRef<HTMLCanvasElement>(null);\par
+  const [deepARInstance, setDeepARInstance] = useState<any>(null);\par
+  const [activeFilter, setActiveFilter] = useState<string>('none');\par
+\par
+  useEffect(() => \{\par
+    if (!canvasRef.current) return;\par
+\par
+    // Initialize the face tracking and augmentation engine\par
+    const deepAR = new DeepAR(\{\par
+      licenseKey: process.env.NEXT_PUBLIC_DEEPAR_KEY || '',\par
+      canvas: canvasRef.current,\par
+      effect: '/filters/emoji.deepar' // Defaults to safe full face-hide on startup\par
+    \});\par
+\par
+    deepAR.initialize().then(() => \{\par
+      setDeepARInstance(deepAR);\par
+    \});\par
+\par
+    return () => \{\par
+      deepAR.shutdown();\par
+    \};\par
+  \}, []);\par
+\par
+  const changeFilter = async (filter: FilterItem) => \{\par
+    if (filter.tier === 'PREMIUM' && userTier === 'FREE') \{\par
+      alert('This specialized animal mesh is locked. Please purchase ChattMate Monthly/Yearly premium package!');\par
+      return;\par
+    \}\par
+    \par
+    if (deepARInstance) \{\par
+      await deepARInstance.switchEffect(filter.file);\par
+      setActiveFilter(filter.id);\par
+    \}\par
+  \};\par
+\par
+  return (\par
+    <div className="grid grid-cols-4 gap-6 bg-slate-900 p-6 text-white rounded-xl">\par
+      <div className="col-span-3 relative">\par
+        \{/* The underlying tracking target layer */\}\par
+        <canvas ref=\{canvasRef\} className="w-full aspect-video rounded-lg bg-black border border-slate-700" />\par
+        <div className="absolute top-4 left-4 bg-black/60 px-3 py-1 rounded text-xs text-pink-400 font-bold">\par
+          Active Privacy Layer: \{activeFilter\}\par
+        </div>\par
+      </div>\par
+\par
+      \{/* Filter Selection Drawer */\}\par
+      <div className="bg-slate-800 p-4 rounded-lg space-y-4">\par
+        <h3 className="font-bold text-pink-500 border-b border-slate-700 pb-2">Streamer Mask Settings</h3>\par
+        <div className="space-y-2 max-h-[400px] overflow-y-auto">\par
+          \{FILTER_STORE.map((filter) => (\par
+            <button\par
+              key=\{filter.id\}\par
+              onClick=\{() => changeFilter(filter)\}\par
+              className=\{`w-full text-left p-2.5 rounded text-sm transition-all flex justify-between items-center $\{\par
+                activeFilter === filter.id ? 'bg-pink-600 font-bold' : 'bg-slate-700 hover:bg-slate-600'\par
+              \}`\}\par
+            >\par
+              <span>\{filter.name\}</span>\par
+              \{filter.tier === 'PREMIUM' && (\par
+                <span className="text-[10px] bg-yellow-500 text-black px-1.5 py-0.5 rounded font-extrabold">PREMIUM</span>\par
+              )\}\par
+            </button>\par
+          ))\}\par
+        </div>\par
+      </div>\par
+    </div>\par
+  );\par
+\}\par
+\f3\u-10179?\u-9074?\f2  \f0 Premium Tier Strategy & Package Configurations\par
+To incentivize broadcasters to purchase packages or get viewers to subscribe, establish your application packages on a dedicated pricing route (app/premium/page.tsx):\par
+\par
+Package Tier\tab Pricing Structure\tab Use Case Benefit\par
+ChattMate Basic\tab Free (Fully KYC Verified Only)\tab Can access low-latency video rooms, stream with basic cartoon/emoji blur face protections.\par
+ChattMate Premium Monthly\tab\u8369?499 / month (GCash/Maya)\tab Unlocks premium 3D textured animal filters (Wolf, Tiger, Panther), facial touch-ups, custom background replacements.\par
+ChattMate Executive Yearly\tab\u8369?3,999 / year (~33% savings)\tab All premium tracking filters, priority room placement on the PH discovery board, zero transaction fees on token cash-outs.\par
+How to link the Canvas stream back to LiveKit:\par
+When hooking this into your stream publishing interface, you construct your room video track directly from your filtered browser canvas instance like this:\par
+\par
+TypeScript\par
+const canvasStream = canvasRef.current.captureStream(30); // Capture canvas at 30 FPS\par
+const videoTrack = canvasStream.getVideoTracks()[0];\par
+\par
+// Publish this filtered track via the LiveKit Room handler\par
+await currentRoom.localParticipant.publishTrack(videoTrack, \{ name: 'camera' \});\par
+This ensures that your server never even sees or records the broadcaster's real face\f2\emdash the obfuscated emoji/animal canvas is the only video sequence that travels outside of their physical machine.\par
+\par
+Show structural design of web application\par
+\par
+To support specialized features like privacy mask pipelines, high-concurrency chatting, and payment validation gates, ChattMate needs a highly modular architectural layout.\par
+\par
+Breaking the application into separate, isolated functional units prevents a spike in chat room tipping traffic from breaking your identity validation framework or crashing the WebRTC video loops.\par
+\par
+\f1\u-10179?\u-8710?\u-497?\f2  \f0 Microservices System Architecture Blueprint\par
+ChattMate decoupled microservices layout map, AI generated\par
+ChattMate decoupled microservices layout map. Source: VectorMine / Getty Images\par
+\f1\u-10178?\u-8719?\f2  \f0 The Complete Component Architecture Directory\par
+When organizing your development workspace locally, your full-stack directory layout should strictly align with this clean structural hierarchy:\par
+\par
+Plaintext\par
+chattmate/\par
+\f4\u9500?\u9472?\u9472?\f2  \f0 app/                        # Next.js App Router Layer\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 api/                    # Serverless Middleware Endpoints\par
+\f4\u9474?\f2    \f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 auth/               # Google OAuth callback validation handlers\par
+\f4\u9474?\f2    \f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 kyc-webhook/        # Secure Sumsub/SmileID webhook handler \par
+\f4\u9474?\f2    \f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 livekit-token/      # Signed WebRTC JWT generation engine\par
+\f4\u9474?\f2    \f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 payment-verify/     # GCash / Maya callback confirmation endpoint\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 account-gated/          # Pay-to-Play feature wall landing route\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 profile/                # User account panel\par
+\f4\u9474?\f2    \f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 edit/               # Gated settings layout (Visibility, Habits, Preferences)\par
+\f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 stream/                 \par
+\f4\u9474?\f2        \f4\u9492?\u9472?\u9472?\f2  \f0 broadcast/          # Restricted streaming console page\par
+\f4\u9500?\u9472?\u9472?\f2  \f0 components/                 # Reusable Client-Side Modules\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 ARFilterSelector.tsx    # Face filter drawer (DeepAR face-mesh runtime hooks)\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 ChattRoom.tsx           # LiveKit video view grid + socket layer wrapper\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 ProfileForm.tsx         # Step 1 registration field layout\par
+\f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 TipsChatBox.tsx         # WebSocket reverse-scroll message frame + tip banner\par
+\f4\u9500?\u9472?\u9472?\f2  \f0 prisma/                     # Database Management\par
+\f4\u9474?\f2    \f4\u9500?\u9472?\u9472?\f2  \f0 schema.prisma           # Relational schema mappings (PostgreSQL)\par
+\f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 seed.ts                 # Dev testing account insertion logic\par
+\f4\u9500?\u9472?\u9472?\f2  \f0 public/                     \par
+\f4\u9474?\f2    \f4\u9492?\u9472?\u9472?\f2  \f0 filters/                # Compiled 3D animal masks & emoji .deepar files\par
+\f4\u9492?\u9472?\u9472?\f2  \f0 middleware.ts               # Server-side route authorization gate keeper\par
+\f3\u-10179?\u-8956?\f2  \f0 Dynamic Technical Data-Flow Cycle\par
+To visualize how these physical components interact under heavy production usage, let us trace a typical interaction path across the core modules:\par
+\par
+[ FRONTEND APP LAYER ] \par
+\f2       \f4\u9474?\f2  \f0\par
+\f2       \f4\u9500?\u9472?\u9472?\u9472?\f2  \f0 (1. Processes Video locally via WebGL) \f4\u9472?\u9472?\f0 > [ ARFilterSelector ]\par
+\f2       \f4\u9474?\f2                                                      \f4\u9474?\f0\par
+\f2       \f4\u9500?\u9472?\u9472?\u9472?\f2  \f0 (2. Forwards masked canvas track) \f4\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9524?\u9472?\u9472?\f0 > [ ChattRoom (WebRTC) ] \f4\u9472?\u9472?\f0 > [ LiveKit SFU Server ]\par
+\f2       \f4\u9474?\f0\par
+\f2       \f4\u9492?\u9472?\u9472?\u9472?\f2  \f0 (3. Sends tipping events / transactions) \f4\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\u9472?\f0 > [ TipsChatBox (WS) ]  \f4\u9472?\u9472?\f0 > [ Redis Pub/Sub Cache ]\par
+\f2                                                                                                     \f4\u9474?\f0\par
+\f2                                                                                                     \f4\u9660?\f0\par
+                                                                                            [ PostgreSQL Primary ]\par
+\f1\u-10178?\u-8736?\f2  \f0 Structural Optimization Rules\par
+Decoupled Video Track Processing: Notice that your face filters run directly inside the browser client sandbox via ARFilterSelector before sending media data. This design pattern ensures your central API servers handle zero real-time video encoding loads.\par
+\par
+Asynchronous Ledger Accounting: When a user tips a performer inside TipsChatBox, the active payment state hits a fast Redis Cache instantly to update the text chat view under a millisecond. The server then pushes the update down to the PostgreSQL Primary Database asynchronously to log the legal audit trail securely without choking active server threads.\par
+\par
+\par
+\par
+\par
+Gemini is AI and can make mistakes.\par
+}
+ 
